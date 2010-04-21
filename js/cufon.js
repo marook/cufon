@@ -541,6 +541,81 @@ var Cufon = (function() {
 
 	}
 
+	function ReplaceQueue() {
+		var queue = [];
+		var running = false;
+
+		function startQueueWorker(){
+			running = true;
+			window.setTimeout('Cufon.replaceQueue.work();', 0);
+		}
+
+		this.add = function(el, options){
+			queue.push({el: el, options: options});
+
+			if(running === false){
+				startQueueWorker();
+			}
+		}
+
+		this.work = function(){
+			var e = queue.shift();
+
+			try{
+				var name = e.el.nodeName.toLowerCase();
+				if (e.options.ignore[name]) return;
+				var replace = !e.options.textless[name];
+				var style = CSS.getStyle(attach(e.el, e.options)).extend(e.options);
+				// may cause issues if the element contains other elements
+				// with larger fontSize, however such cases are rare and can
+				// be fixed by using a more specific selector
+				if (parseFloat(style.get('fontSize')) === 0) return;
+				var font = getFont(e.el, style), node, type, next, anchor, text, lastElement;
+				if (!font) return;
+				for (node = e.el.firstChild; node; node = next) {
+					type = node.nodeType;
+					next = node.nextSibling;
+					if (replace && type == 3) {
+						// Node.normalize() is broken in IE 6, 7, 8
+						if (anchor) {
+							anchor.appendData(node.data);
+							e.el.removeChild(node);
+						}
+						else anchor = node;
+						if (next) continue;
+					}
+					if (anchor) {
+						e.el.replaceChild(process(font,
+							CSS.whiteSpace(anchor.data, style, anchor, lastElement),
+							style, e.options, node, e.el), anchor);
+						anchor = null;
+					}
+					if (type == 1) {
+						if (node.firstChild) {
+							if (node.nodeName.toLowerCase() == 'cufon') {
+								engines[e.options.engine](font, null, style, e.options, node, e.el);
+							}
+							else arguments.callee(node, e.options);
+						}
+						lastElement = node;
+					}
+				}
+			}
+			catch(err){
+				// can't cufonize something... too bad
+			}
+
+			if(queue.length > 0){
+				window.setTimeout('Cufon.replaceQueue.work();', 20);
+			}
+			else{
+				running = false;
+			}
+		}
+	}
+
+        api.replaceQueue = new ReplaceQueue();
+
 	function addEvent(el, type, listener) {
 		if (el.addEventListener) {
 			el.addEventListener(type, listener, false);
@@ -613,6 +688,10 @@ var Cufon = (function() {
 			if (processed) fragment.appendChild(processed);
 		}
 		return fragment;
+	}
+
+	function replaceElementQueue(el, options) {
+		api.replaceQueue.add(el, options);
 	}
 
 	function replaceElement(el, options) {
@@ -782,7 +861,14 @@ var Cufon = (function() {
 			for (var i = 0, l = elements.length; i < l; ++i) {
 				var el = elements[i];
 				if (typeof el == 'string') api.replace(options.selector(el), options, true);
-				else replaceElement(el, options);
+				else{
+					if(navigator.appName == "Microsoft Internet Explorer"){
+						replaceElementQueue(el, options);
+					}
+					else{
+						replaceElement(el, options);
+					}
+				}
 			}
 		});
 		return api;
